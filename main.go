@@ -5,12 +5,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"sync"
 
 	"github.com/google/gopacket"
@@ -27,10 +28,10 @@ func main() {
 	if *configPath == "" {
 		log.Fatalln("expected a config, but none was given")
 	}
-	
+
 	config, err := LoadConfigFromFile(*configPath)
 	boomtown(err)
-	
+
 	ifaces, err := net.Interfaces()
 	boomtown(err)
 
@@ -105,19 +106,19 @@ func readARP(handle *pcap.Handle, iface *net.Interface, stop chan struct{}, conf
 			if !net.IP(arp.SourceProtAddress).Equal(net.ParseIP("0.0.0.0")) {
 				continue
 			}
-			
+
 			found := false
 			for _, btn := range config.Buttons {
 				if net.HardwareAddr(arp.SourceHwAddress).String() == btn.Address {
 					found = true
 					log.Printf("received ping for button '%v'", btn.Name)
-					
+
 					if btn.URL != "" && btn.Method != "" {
-						go dispatchHTTPRequest(btn.Method, btn.URL)
+						go dispatchHTTPRequestForBtn(&btn)
 					}
 				}
 			}
-			
+
 			if !found {
 				log.Printf("received ping for unknown MAC addr: %v\n", net.HardwareAddr(arp.SourceHwAddress))
 			}
@@ -125,24 +126,34 @@ func readARP(handle *pcap.Handle, iface *net.Interface, stop chan struct{}, conf
 	}
 }
 
-func dispatchHTTPRequest(method, uri string) {
-	parsed, err := url.Parse(uri)
-	if err != nil {
-		log.Fatalln("invalid url")
-	}
-	
-	if parsed.Scheme == "" {
-		parsed.Scheme = "http"
-	}
-	
-	switch method {
-	case "GET":
-		resp, err := http.Get(parsed.String())
+func dispatchHTTPRequestForBtn(btn *Button) {
+	var buf *bytes.Reader
+
+	if btn.Method == "POST" {
+		body, err := json.Marshal(btn.Body)
 		if err != nil {
-			log.Println(err)
-		} else {
-			log.Printf("GET %v returned status %q\n", parsed, resp.Status)
+			log.Fatalln(err)
 		}
+
+		buf = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequest(btn.Method, btn.URL, buf)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	client := &http.Client{}
+
+	for hdr, val := range btn.Headers {
+		req.Header.Add(hdr, val)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println(err)
+	} else {
+		log.Printf("%v %v returned status %q\n", req.Method, req.URL, resp.Status)
 	}
 }
 

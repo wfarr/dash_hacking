@@ -5,7 +5,13 @@
       "address": "a0:02:dc:f3:82:91",
       "interface": "en0",
       "url": "http://localhost:9200/",
-      "method": "GET"
+      "method": "POST",
+      "headers": {
+        "X-Example-Header": "FOOBAR"
+      },
+      "body": {
+        "baz": "quux"
+      }
     }
   ]
 }
